@@ -1,0 +1,202 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+## Linear Regression for Prostate
+
+### Selecting the training data 
+
+```{r, message=FALSE, warning=FALSE}
+data_Set <- read.table("prostate.txt")
+training_data <- subset(data_Set, train == "TRUE")
+validation_data <- subset(data_Set, train == "FALSE")
+validation_data <- subset(validation_data[, 1:9])
+``` 
+
+### Data Exploration
+
+#### One Variable Statistic Summary
+
+For one variable statistic summary, we will remove the train column
+
+```{r, message=FALSE, warning=FALSE}
+training_data <- subset(training_data[, 1:9])
+summary(training_data)
+```
+
+Let us scale the data for predictors to mean zero
+
+```{r, message=FALSE, warning=FALSE}
+scaled_train_data <- cbind(scale(training_data[,1:8]), training_data$lpsa)
+colnames(scaled_train_data)[9] = "lpsa"
+scaled_predictors <- subset(scaled_train_data[, 1:8])
+```
+
+#### Outliers
+
+BoxPlot for checking the outlier on predictors
+```{r, message=FALSE, warning=FALSE}
+boxplot(scaled_predictors)
+```
+
+From boxplot we can check that there might be 3 outliers for weight, 1 for svi and 1 gleason
+We will work with all the datasets, considering them as rare values.
+
+#### 2 Column Summary
+
+Now for 2 column summary, we will check the correlation
+
+```{r, message=FALSE, warning=FALSE}
+cor(scaled_train_data)
+```
+
+From the above correlation chart, we can say that lcavol has highest correlation with lpsa
+and age has lowest correlation.
+
+#### Missing Values
+
+```{r, message=FALSE, warning=FALSE}
+is.na(scaled_train_data)
+```
+
+As there is no True, so there is no missing values in our data.
+
+### Assumption of Normality
+
+This is for linear model with all the predictors
+
+```{r, message=FALSE, warning=FALSE}
+linear_model <- lm(formula = lpsa ~ lcavol + lweight + age + lbph + svi + lcp + gleason + pgg45, data = training_data)
+summary(linear_model)
+```
+
+
+So qq plot from the residuals obtained is as follows
+
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages("car")
+library(car)
+qqPlot(linear_model)
+```
+
+From QQ plot, we can say that it has somewhat straight line, so residuals are normally distributed.
+
+
+### Variable Selection
+
+
+To perform variable selection, using all subsets selection, we will use leap library
+
+#### Exhaustive Search
+```{r, message=FALSE, warning=FALSE}
+require(leaps)
+scaled_train_data <- as.data.frame(scaled_train_data)
+exh <- regsubsets(lpsa~.,data = scaled_train_data, method = "exhaustive")
+```
+
+```{r, message=FALSE, warning=FALSE}
+plot(exh,scale = "adjr2")
+```
+
+As per our adj R2 graph, only gleason seems to be less effective predictor.
+
+
+#### Backward Search
+
+```{r, message=FALSE, warning=FALSE}
+back <- regsubsets(lpsa~.,data = scaled_train_data, method = "backward")
+plot(back,scale = "adjr2")
+```
+
+Adjustedr2 graph for backward search
+
+
+
+
+#### Forward Search
+
+```{r, message=FALSE, warning=FALSE}
+fwd <- regsubsets(lpsa~.,data = scaled_train_data, method = "forward")
+plot(fwd,scale = "adjr2")
+```
+adjustedr2 graph for Forward Search
+
+
+
+Using adjr2 graph, we can eliminate gleason from our set of predictors.
+
+
+
+Model using Variable Selection from exhausitive search is -
+
+```{r, message=FALSE, warning=FALSE}
+linear_model_var <- lm(formula = lpsa ~ lcavol + lweight + age + lbph + svi + lcp + pgg45, data = training_data)
+summary(linear_model_var)
+```
+
+
+#### Statistical Variable Selection
+
+Here I have used cross validation to build a model with selected variables by using caret library. 
+number = 10 signifies the folds
+
+
+```{r, message=FALSE, warning=FALSE}
+library(caret)
+train_control <- trainControl(method="cv", number=10)
+linear_model_cv <- lm(formula = lpsa ~ lcavol + lweight + age + lbph + svi + lcp + pgg45 + gleason, 
+                      data = data_Set, trControl=train_control, method = "lm")
+
+summary(linear_model_cv)
+```
+
+
+
+
+
+
+
+#### Performance Evaluation
+
+Prediction using model with all predictors
+
+```{r, message=FALSE, warning=FALSE}
+predict_lpsa <- predict(linear_model,validation_data)
+mean_sq_error <- mean((predict_lpsa-validation_data$lpsa)^2)
+print(mean_sq_error)
+```
+
+Prediction using model from all subset selection
+
+
+```{r, message=FALSE, warning=FALSE}
+predict_lpsa_sub <- predict(linear_model_var,validation_data)
+mean_sq_error_sub <- mean((predict_lpsa_sub-validation_data$lpsa)^2)
+print(mean_sq_error_sub)
+```
+
+
+Prediction using model from Cross Validation
+
+
+```{r, message=FALSE, warning=FALSE}
+predict_lpsa_cv <- predict(linear_model_cv,validation_data)
+mean_sq_error_cv <- mean((predict_lpsa_cv-validation_data$lpsa)^2)
+print(mean_sq_error_cv)
+```
+
+Therefore, as we can see from MSE, Cross Validation model performs best as it has worked on folds where each observation has acted as validation and training data. Also, each observation is acted as validation only once. So, CV model has chosen the best model from performing all folds.
+
+
+### Interpretation of Results
+
+Linear model from cross validation work out as best on predicting data from validation data set.
+
+```{r, message=FALSE, warning=FALSE}
+plot(linear_model_cv)
+```
+
+This model is best as its MSE is minimum among all, i.e 0.414. Also, we can see that it has minimum p-value. Also, In qq plot straight line fits the maximum of point.

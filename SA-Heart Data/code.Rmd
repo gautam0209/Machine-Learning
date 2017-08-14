@@ -1,0 +1,360 @@
+---
+title: "HomeWork3"
+output:
+  html_document: default
+  word_document: default
+---
+
+## HomeWork3
+
+### 1. Data preparation and Exploration
+#### a) Selecting training data
+
+Select the 50% data randomly for training and remaining for validation
+
+```{r, message=FALSE, warning=FALSE}
+set.seed(55)
+data_set <- read.table("SA-heart-data.csv", sep = "," , header = TRUE)
+training_index <- sample(1:nrow(data_set), 231, replace = FALSE) 
+training_set <- data_set[training_index,]
+validation_set <- data_set[-training_index,]
+``` 
+
+#### b) Data Exploration
+
+Remove the first column from training and validation set.
+Then, see the one variable summary for training data.
+
+```{r, message=FALSE, warning=FALSE}
+training_set <- training_set[,-1]
+validation_set <- validation_set[,-1]
+summary(training_set)
+```
+
+Two Variable Summary Statistics :
+```{r, message=FALSE, warning=FALSE}
+pairs(training_set) #scatter-plot
+```
+
+
+Checking correlation and converting categorical predictor famhist to numeric as {1 or 2}: 
+```{r, message=FALSE, warning=FALSE}
+training_set$famhist <- as.numeric(training_set$famhist)
+validation_set$famhist <- as.numeric(validation_set$famhist)
+cor(training_set) # correlation between features and label
+```
+
+We can see that famhist, age and tobacco are highly correlated to chd
+
+Let's check any missing values:
+
+```{r, message=FALSE, warning=FALSE}
+any(is.na(training_set))
+```
+There is no missing value
+
+Outliers:
+
+```{r, message=FALSE, warning=FALSE}
+boxplot(training_set)
+```
+As we can see, there are some values outside box but we will proceed these values as rare data points.
+
+### 2)
+#### Logistic Regression on training set
+
+Make Logistic model with all predictors
+
+```{r, message=FALSE, warning=FALSE}
+chd.out <- glm(chd ~ sbp + tobacco + ldl + adiposity + famhist + typea + obesity + alcohol + age, data = training_set, family = binomial())
+summary(chd.out)
+```
+
+#### Variable Selection using all subset selection
+
+Using leaps library, we will run exhaustive method to get all subset selection
+```{r, message=FALSE, warning=FALSE}
+require(leaps)
+exhaustive <- regsubsets(chd~.,data = training_set, method = "exhaustive")
+summ.exhaustive <- summary(exhaustive)
+summ.exhaustive
+
+```
+Graph below showing best set of parameters for each number of selection of parameters
+
+We will find it using Minimum BIC value
+
+
+```{r, message=FALSE, warning=FALSE}
+plot(summ.exhaustive$bic)
+```
+We can see that minimum value of bic is for 3 parameters. So using exhaustive summary, we can select tobacco, famhist and age.
+
+
+Model with predictors through all subset selection and BIC: 
+```{r, message=FALSE, warning=FALSE}
+bic.model <- glm(chd~age+tobacco + famhist, data = training_set, family = binomial())
+summary(bic.model)
+```
+
+###3) Fitting LDA on training set
+
+Here, we just fit LDA on training set. We will look at the ROC in 6th question.
+
+```{r, message=FALSE, warning=FALSE}
+require(MASS)
+X <- as.matrix(training_set[,-10])
+Y <- as.matrix(training_set[,10])
+lda.model <- lda(x = X, grouping = Y ,cv = TRUE)
+```
+
+###4) Lasso Regularization
+
+Use glmnet for lasso model. Provide lambad range from 10^10 to 10^-2
+
+```{r, message=FALSE, warning=FALSE}
+require(glmnet)
+lambda.range <- 10^seq(10, -2, length =100)
+lasso.model <- glmnet(X, Y, lambda = lambda.range)
+```
+
+
+#### a) Plot of path of individual coefficients
+
+Plotting the path for coefficients for different lambda values. 
+X - axis scale is limited to (-5,5)
+
+```{r, message=FALSE, warning=FALSE}
+plot(lasso.model,main = "Lasso Regression", label = TRUE, xvar ='lambda', xlim = c(-5,5))
+```
+
+#### b) Cross Validation 
+
+We will use cross validation to find best lambda value.
+
+
+```{r, message=FALSE, warning=FALSE}
+cv.out <- cv.glmnet(X, Y)
+plot(cv.out)
+```
+
+Graph above shows the parameter versus mean squared error graph using cross validation model.
+Range of log of lambda is shown as -2.9 to -4.9 in the graph. 
+
+#### c) Regularization parameter
+
+```{r, message=FALSE, warning=FALSE}
+best.lambda <- cv.out$lambda.min
+best.lambda
+lasso.cv.model <- glmnet(X,Y,lambda = best.lambda) # Model with best lambda
+```
+Minimum lamda return is 0.00748127. We will build model using this lambda.
+
+#### d) Selected Predictor model
+Checking coefficients of lasso.cv.model
+```{r, message=FALSE, warning=FALSE}
+coefficients(lasso.cv.model)
+```
+
+Removing obesity and alcohol as it is null and only ldl, tobacco and famhist has values 
+significantly greater than 0. So, we will build the model using ldl, tobacco and famhist as predictors.
+
+```{r, message=FALSE, warning=FALSE}
+best.lasso <- glm(chd~ldl +famhist + tobacco, data = training_set, family = binomial())
+```
+
+### 5) Nearest Shrunken Centroid Model
+
+####a) Cross Validation to select best regularization parameter
+
+First we will train the model on data using pamr.train. Then, we will use cross validation over the 30 values of thresholds to plot the graph for those.
+
+```{r, message=FALSE, warning=FALSE}
+library(pamr)
+data.train <- list(x =X, y =Y, genenames=as.character(1:1000))
+centroid.model <- pamr.train(data.train)
+cv.out.pamr <- pamr.cv(centroid.model, data.train)
+pamr.plotcv(cv.out.pamr)
+```
+ 
+ Graph is showing to have the value of threshold from 0.38 to 0.42. We will use confusion to find best threshold.
+ 
+ 
+
+```{r, message=FALSE, warning=FALSE}
+pamr.confusion(cv.out.pamr, threshold = 0.36)
+pamr.confusion(cv.out.pamr, threshold = 0.38)
+pamr.confusion(cv.out.pamr, threshold = 0.4)
+```
+From confusion matrix, it is showing that threshold is optimal from 0.38 to 0.4. Showing error rate as 0.0.393 in that range. So we will choose the threshold value as 0.38.
+
+Best Regularizatio Parameter = 0.38
+
+#### b) Refit the model with selected regularized parameter
+
+Refit the classifier on using full training data set for best threshold
+
+```{r, message=FALSE, warning=FALSE}
+centroid.model.best <- pamr.train(data.train, threshold =  0.38)
+```
+
+#### c) Visualize the centroids of the selected model
+
+Visualizing the centroids using plotcen 
+```{r, message=FALSE, warning=FALSE}
+pamr.plotcen(centroid.model.best, data.train, threshold = 0.18)
+```
+
+####6 Evaluate the performance of classifiers
+
+### a) Performance of classifiers using ROC curves on the training set
+
+## For Logistic model with all predictors
+```{r, message=FALSE, warning=FALSE}
+library(ROCR)
+scores <- predict(chd.out, newdata= training_set , type="response") # predicted prob
+pred <- prediction(scores, labels=training_set$chd)
+# comparing pred prob to label
+perf <- performance(pred, "tpr", "fpr")
+# plot the ROC curve
+plot(perf, colorize=F, main="In-sample ROC curve")
+```
+```{r, message=FALSE, warning=FALSE}
+#area under curve
+unlist(attributes(performance(pred, "auc"))$y.values)
+```
+So correctness of this model on training set is 81.71%
+
+## For BIC model
+
+```{r, message=FALSE, warning=FALSE}
+scores_bic <- predict(bic.model, newdata= training_set, type = "response") 
+# predicted prob
+pred_bic <- prediction(scores_bic, labels=training_set$chd)
+# comparing pred prob to label
+perf_bic <- performance(pred_bic, "tpr", "fpr")
+# plot the ROC curve
+plot(perf_bic, colorize=F, main="In-sample ROC curve")
+```
+
+```{r, message=FALSE, warning=FALSE}
+#area under curve
+unlist(attributes(performance(pred_bic, "auc"))$y.values)
+```
+Bic model predicts value with 79.42% accuracy
+
+
+## For Lasso model
+
+```{r, message=FALSE, warning=FALSE}
+scores_lasso <- predict(best.lasso, newdata= training_set, type = "response") 
+# predicted prob
+pred_lasso <- prediction(scores_lasso, labels=training_set$chd)
+# comparing pred prob to label
+perf_lasso <- performance(pred_lasso, "tpr", "fpr")
+# plot the ROC curve
+plot(perf_lasso, colorize=F, main="In-sample ROC curve")
+```
+```{r, message=FALSE, warning=FALSE}
+#area under curve
+unlist(attributes(performance(pred_lasso, "auc"))$y.values)
+```
+There is 77.18% accuracy from Lasso model
+
+
+
+
+###6b) ROC on validation set
+
+For Logistic model on all predictors
+
+```{r, message=FALSE, warning=FALSE}
+library(caret)
+scores <- predict(chd.out, newdata= validation_set , type="response") # predicted prob
+
+scores.v <- ifelse(scores>0.5, "1", "0")
+
+pred <- prediction(scores, labels=validation_set$chd)
+
+# comparing pred prob to label
+perf <- performance(pred, "tpr", "fpr")
+# plot the ROC curve
+plot(perf, colorize=F, main="In-sample ROC curve")
+confusionMatrix(scores.v, validation_set$chd, positive = "1")
+```
+
+```{r, message=FALSE, warning=FALSE}
+#area under curve
+unlist(attributes(performance(pred, "auc"))$y.values)
+```
+So correctness of this model on training set is 76.00%
+
+## For BIC model
+
+```{r, message=FALSE, warning=FALSE}
+scores_bic <- predict(bic.model, newdata= validation_set, type = "response") 
+# predicted prob
+pred_bic <- prediction(scores_bic, labels=validation_set$chd)
+# comparing pred prob to label
+perf_bic <- performance(pred_bic, "tpr", "fpr")
+# plot the ROC curve
+plot(perf_bic, colorize=F, main="In-sample ROC curve")
+```
+
+```{r, message=FALSE, warning=FALSE}
+#area under curve
+unlist(attributes(performance(pred_bic, "auc"))$y.values)
+```
+Bic model predicts value with 75.07% accuracy
+
+
+## For Lasso model
+
+```{r, message=FALSE, warning=FALSE}
+scores_lasso <- predict(best.lasso, newdata= validation_set, type = "response") 
+# predicted prob
+pred_lasso <- prediction(scores_lasso, labels=validation_set$chd)
+# comparing pred prob to label
+perf_lasso <- performance(pred_lasso, "tpr", "fpr")
+# plot the ROC curve
+plot(perf_lasso, colorize=F, main="In-sample ROC curve")
+```
+```{r, message=FALSE, warning=FALSE}
+#area under curve
+unlist(attributes(performance(pred_lasso, "auc"))$y.values)
+```
+There is 73.59% accuracy from Lasso model
+
+
+6c) Summary For ROC :
+
+On training set:
+
+Logistic Model with all predictors: 81.71%
+BIC model : 79.42%
+Lasso Model: 77.18%
+
+On validation set:
+
+Logistic Model with all predictors: 76.00%
+BIC model : 75.07%
+Lasso Model: 73.59%
+
+Accracy prediction is more on training set, but it's not very much large from validation set. For ML model, accuracy on validation data is more considerable.
+
+In both validation and training data :
+Logistic Model with all predictors performs better than all. But BIC model founded using all subset and crossvalidation is to be chosen among all as it's more optimal. It is using only three features chosen through cross validation and minimum BIC value. It's accuracy also is nearly equal to accuracy of model with all predictors.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
